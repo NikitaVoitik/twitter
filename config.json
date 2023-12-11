@@ -1,0 +1,9 @@
+{
+  "pathes": {
+    "project_path": "/Users/nikitavoitik/Documents/prog/python/twitter"
+  },
+  "logging": {
+    "level": "info",
+    "enable": "True"
+  }
+}
