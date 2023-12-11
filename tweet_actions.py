@@ -46,7 +46,8 @@ class Account():
             # await self.follow('OP_SPOILERS2023')
             # await self.tweet('Hello guys')
             # await self.comment('1732373008176816235', 'Cool')
-            await self.get_users()
+            # print(await self.get_tweets())
+            # print(await self.get_popular_users())
 
     async def _get_ct0(self) -> str:
         try:
@@ -185,11 +186,32 @@ class Account():
         except Exception as er:
             logger.error(f"Account {self.name} error {er} when commenting {tweet_id}")
 
-    async def get_users(self) -> list:
+    async def get_tweets(self) -> list:
         try:
-            url = "https://api.twitter.com/1.1/account/multi/list.json"
+            url = "https://twitter.com/i/api/graphql/4lamDJErKVeOVyGh-y2UXQ/HomeLatestTimeline?variables=%7B%22count%22%3A20%2C%22includePromotedContent%22%3Atrue%2C%22latestControlAvailable%22%3Atrue%2C%22requestContext%22%3A%22launch%22%7D&features=%7B%22responsive_web_graphql_exclude_directive_enabled%22%3Atrue%2C%22verified_phone_label_enabled%22%3Afalse%2C%22responsive_web_home_pinned_timelines_enabled%22%3Atrue%2C%22creator_subscriptions_tweet_preview_api_enabled%22%3Atrue%2C%22responsive_web_graphql_timeline_navigation_enabled%22%3Atrue%2C%22responsive_web_graphql_skip_user_profile_image_extensions_enabled%22%3Afalse%2C%22c9s_tweet_anatomy_moderator_badge_enabled%22%3Atrue%2C%22tweetypie_unmention_optimization_enabled%22%3Atrue%2C%22responsive_web_edit_tweet_api_enabled%22%3Atrue%2C%22graphql_is_translatable_rweb_tweet_is_translatable_enabled%22%3Atrue%2C%22view_counts_everywhere_api_enabled%22%3Atrue%2C%22longform_notetweets_consumption_enabled%22%3Atrue%2C%22responsive_web_twitter_article_tweet_consumption_enabled%22%3Afalse%2C%22tweet_awards_web_tipping_enabled%22%3Afalse%2C%22freedom_of_speech_not_reach_fetch_enabled%22%3Atrue%2C%22standardized_nudges_misinfo%22%3Atrue%2C%22tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled%22%3Atrue%2C%22longform_notetweets_rich_text_read_enabled%22%3Atrue%2C%22longform_notetweets_inline_media_enabled%22%3Atrue%2C%22responsive_web_media_download_video_enabled%22%3Afalse%2C%22responsive_web_enhance_cards_enabled%22%3Afalse%7D"
             async with self.session.get(url, headers=self.headers, ssl=False) as res:
                 js = await res.json()
-                print(js)
+                tweets = js['data']['home']['home_timeline_urt']['instructions'][0]['entries']
+                result = []
+                for i in tweets:
+                    cur = i['entryId']
+                    if cur[0] == 'p':
+                        continue
+                    result.append(cur)
+                return result
         except Exception as er:
-            logger.error(f"Account {self.name} error {er} when getting popular users")
+            logger.error(f"Account {self.name} error {er} when getting tweets")
+
+    async def get_popular_users(self) -> list:
+        try:
+            url = "https://twitter.com/i/api/graphql/CYSD3D16ZF2JCxd9OR51Yg/ConnectTabTimeline?variables=%7B%22count%22%3A20%2C%22context%22%3A%22%7B%7D%22%7D&features=%7B%22responsive_web_graphql_exclude_directive_enabled%22%3Atrue%2C%22verified_phone_label_enabled%22%3Afalse%2C%22responsive_web_home_pinned_timelines_enabled%22%3Atrue%2C%22creator_subscriptions_tweet_preview_api_enabled%22%3Atrue%2C%22responsive_web_graphql_timeline_navigation_enabled%22%3Atrue%2C%22responsive_web_graphql_skip_user_profile_image_extensions_enabled%22%3Afalse%2C%22c9s_tweet_anatomy_moderator_badge_enabled%22%3Atrue%2C%22tweetypie_unmention_optimization_enabled%22%3Atrue%2C%22responsive_web_edit_tweet_api_enabled%22%3Atrue%2C%22graphql_is_translatable_rweb_tweet_is_translatable_enabled%22%3Atrue%2C%22view_counts_everywhere_api_enabled%22%3Atrue%2C%22longform_notetweets_consumption_enabled%22%3Atrue%2C%22responsive_web_twitter_article_tweet_consumption_enabled%22%3Afalse%2C%22tweet_awards_web_tipping_enabled%22%3Afalse%2C%22freedom_of_speech_not_reach_fetch_enabled%22%3Atrue%2C%22standardized_nudges_misinfo%22%3Atrue%2C%22tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled%22%3Atrue%2C%22longform_notetweets_rich_text_read_enabled%22%3Atrue%2C%22longform_notetweets_inline_media_enabled%22%3Atrue%2C%22responsive_web_media_download_video_enabled%22%3Afalse%2C%22responsive_web_enhance_cards_enabled%22%3Afalse%7D"
+            async with self.session.get(url, headers=self.headers, ssl=False) as res:
+                js = await res.json()
+                tweets = js['data']['connect_tab_timeline']['timeline']['instructions'][2]['entries'][0]['content']['items']
+                result = []
+                for i in tweets:
+                    cur = i['item']['itemContent']['user_results']['result']['legacy']['screen_name']
+                    result.append(cur)
+                return result
+        except Exception as er:
+            logger.error(f"Account {self.name} error {er} when getting tweets")
