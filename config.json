@@ -1,4 +1,10 @@
 {
+  "account_lifestyle": {
+    "overall_length": [45, 90],
+    "sessions_in_week": [5, 15],
+    "chance_of_like": [15, 20],
+    "chance_of_retweet": [4, 8]
+  },
   "pathes": {
     "project_path": "/Users/nikitavoitik/Documents/prog/python/twitter"
   },
