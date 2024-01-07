@@ -5,49 +5,111 @@ from hashlib import md5
 from random import randbytes
 from fake_useragent import UserAgent
 import time
+import dateutil.parser
+import json
+from json import JSONEncoder
 import config
+import datetime
+from datetime import datetime as Datetime, timedelta
 from logs.logger import Logger
 from solve_captcha import SolveCaptcha
 
 logger = Logger("tweet_actions_py")
+add_to_database = []
+
+
+class DateTimeEncoder(JSONEncoder):
+    # Override the default method
+    def default(self, obj):
+        if isinstance(obj, (datetime.date, datetime)):
+            return obj.isoformat()
+
+
+def DecodeDateTime(empDict):
+    if 'joindate' in empDict:
+        empDict["joindate"] = dateutil.parser.parse(empDict["joindate"])
+        return empDict
 
 
 class Account:
-    def __init__(self, token: str, query_ids: dict, proxy: str) -> None:
+    def __init__(self, token: str, query_ids: dict, proxy: str, twitterDB) -> None:
+        self.session_length = None
         self.session = None
         self.headers = None
         self.name = None
+        self.session_all = None
+        self.schedule = list([] for _ in range(0, 7))
         self.proxy = proxy
+        self.sessions_in_week = randint(config.settings['sessions_in_week'][0], config.settings['sessions_in_week'][1])
         self.ids = query_ids
         self.token = token
+        self.twitterDB = twitterDB
         self.user_agent = UserAgent().random
+        self.table_name = 'TasksAndSchedule'
 
-    async def manage(self):
+    def update_schedule(self):
+        cur_time = Datetime.now()
+        for day in self.schedule:
+            for ind in range(0, len(day)):
+                if day[ind] < cur_time:
+                    day.pop(ind)
         overall_length = randint(config.settings['overall_length'][0], config.settings['overall_length'][1])
-        sessions_in_week = randint(config.settings['sessions_in_week'][0], config.settings['sessions_in_week'][1])
-        session_length = overall_length // sessions_in_week
-        if overall_length % sessions_in_week != 0:
-            session_length += 1
-        in_day = sessions_in_week // 7
-        sessions_each_day = list(in_day for _ in range(0, 7))
-        sessions_in_week %= 7
-        while sessions_in_week:
+        self.session_length = overall_length // self.sessions_in_week
+        if overall_length % self.sessions_in_week != 0:
+            self.session_length += 1
+        cur = 0
+        for i in self.schedule:
+            cur += len(i)
+        left_sessions = self.sessions_in_week - cur
+        sessions_each_day = list(0 for _ in range(0, 7))
+        while left_sessions:
             ind = randint(0, 6)
             sessions_each_day[ind] += 1
-            sessions_in_week -= 1
+            left_sessions -= 1
         for ind in range(0, 7):
             number = sessions_each_day[ind]
             hours = []
+            simple_hours = []
             while number:
-                hour = randint(8, 23)
-                if not hour in hours and not hour - 1 in hours:
-                    hours.append(hour)
+                hour = randint(2, 23)
+                delta = timedelta(days=ind, hours=hour - cur_time.hour)
+                if not hour in simple_hours and not hour - 1 in simple_hours and cur_time + delta > cur_time:
+                    simple_hours.append(hour)
+                    hours.append(cur_time + delta - timedelta(minutes=cur_time.minute))
                 number -= 1
-            sessions_each_day[ind] = hours
-        await self.tweet('Hello, World!')
+            self.schedule[ind] += hours
+            self.schedule[ind].sort()
 
+    async def manage(self):
+        while True:
+            cur_time = Datetime.now()
+            self.update_schedule()
+            # await self.twitterDB.delete_all(self.table_name)
+            # await self.twitterDB.insert(self.table_name, [self.token, ' ', json.dumps(self.schedule, cls=DateTimeEncoder)])
+            # local_schedule = await self.twitterDB.select(self.table_name, ['schedule'])
+            # local_schedule = json.loads(local_schedule[0][0], object_hook=DecodeDateTime)
+            # print(local_schedule)
+            # print(Datetime.strptime(local_schedule[0][0], '%Y-%m-%dT%H:%M:%S.%f'))
+            next_session = 0
+            for day in self.schedule:
+                for ind in range(0, len(day)):
+                    if day[ind] >= cur_time:
+                        next_session = day[ind]
+                        break
+                if next_session:
+                    break
+            wait_time = next_session - cur_time
+            wait_time = wait_time.total_seconds() + randint(0, 3600)
+            await asyncio.sleep(wait_time)
+            await self.launch_session(self.session_length, None)
 
-    async def launch_session(self) -> None:
+    async def first_launch(self):
+        if self.twitterDB.local.get(self.token):
+            if self.twitterDB.local.get(self.token).get('schedule'):
+                self.schedule = self.twitterDB.local[self.token]['schedule']
+        await self.manage()
+
+    async def launch_session(self, session_length: int, tasks: dict | None = None) -> None:
         csrf_token = md5(randbytes(32)).hexdigest()
         cookie = f"des_opt_in=Y; auth_token={self.token}; ct0={csrf_token}; x-csrf-token={csrf_token};"
         self.headers = {
@@ -73,6 +135,7 @@ class Account:
                 await SolveCaptcha(self.token, csrf_token).solve_captcha("")
             self.headers['cookie'] = f"des_opt_in=Y; auth_token={self.token}; ct0={csrf_token};"
             self.headers['x-csrf-token'] = csrf_token
+            await self.account_life(session_length, tasks)
 
             # await self.like('1735742272946442398')
             # await self.retweet('1735742272946442398')
@@ -84,9 +147,8 @@ class Account:
             # users = await self.get_popular_users()
             # await self.follow_users(users, 10)
             # await self.account_life(20, {'follow_popular_users': 10})
-            await self.manage()
 
-    async def account_life(self, session_length: int, tasks: dict) -> None:
+    async def account_life(self, session_length: int, tasks: dict | None = None) -> None:
         end_time = time.time() + session_length * 60
         tweets = await self.get_tweets()
         chance_like = randint(config.settings['chance_of_like'][0], config.settings['chance_of_like'][1])
@@ -95,7 +157,7 @@ class Account:
         chance_tasks = randint(1, 100)
         if chance_tasks <= 50:
             await self.complete_tasks(tasks, [2, 3])
-        while time.time() < end_time:
+        while time.time() < end_time + randint(-60, 60):
             if not tweets[cur_tweet].isdigit():
                 await asyncio.sleep(randint(4, 8))
                 cur_tweet += 1
@@ -112,7 +174,9 @@ class Account:
         if chance_tasks > 50:
             await self.complete_tasks(tasks, [2, 3])
 
-    async def complete_tasks(self, tasks: dict, delay: list) -> None:
+    async def complete_tasks(self, tasks: dict | None, delay: list) -> None:
+        if tasks is None:
+            return
         for task in tasks:
             content = tasks[task]
             if task == "follow_popular_users":
@@ -344,15 +408,14 @@ class Account:
         except Exception as er:
             logger.error(f"Account {self.name} error {er} when getting popular users")
 
-
-async def follow_users(self, users: list, number: int) -> None:
-    generated = set()
-    while len(generated) < number:
-        generated.add(users[randint(0, len(users) - 1)])
-    try:
-        for user in generated:
-            await self.follow(user)
-            await asyncio.sleep(randint(2, 5))
-        logger.info(f"Account {self.name} successfully followed users")
-    except Exception as er:
-        logger.error(f"Account {self.name} error {er} when trying to follow users")
+    async def follow_users(self, users: list, number: int) -> None:
+        generated = set()
+        while len(generated) < number:
+            generated.add(users[randint(0, len(users) - 1)])
+        try:
+            for user in generated:
+                await self.follow(user)
+                await asyncio.sleep(randint(2, 5))
+            logger.info(f"Account {self.name} successfully followed users")
+        except Exception as er:
+            logger.error(f"Account {self.name} error {er} when trying to follow users")
