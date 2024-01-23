@@ -3,9 +3,9 @@ import aiohttp
 from playwright.async_api import async_playwright
 from playwright_stealth import stealth_async
 import time
-from logs.logger import Logger
+from loguru import logger
 
-logger = Logger("solve_captcha_py")
+logger.add("logs/captcha.log", rotation="1 week")
 
 
 async def create_task() -> tuple[int | bool, str]:

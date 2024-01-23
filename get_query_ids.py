@@ -1,11 +1,9 @@
 import aiohttp
 import asyncio
-from logs.logger import Logger
-
-logger = Logger("get_query_ids_py")
+from loguru import logger
 
 timeout = aiohttp.ClientTimeout(total=60)
-
+logger.add("logs/query_ids", rotation="1 week")
 
 async def main_response(session: aiohttp.ClientSession, proxy: str):
     url = 'https://abs.twimg.com/responsive-web/client-web/main.f3ada2b5.js'

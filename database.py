@@ -6,7 +6,6 @@ class Database:
     def __init__(self):
         self.cursor = None
         self.connection = None
-        self.local = dict()
 
     async def connect(self):
         self.connection = await aiosqlite.connect('twitter.db')
@@ -37,7 +36,7 @@ class Database:
         columns = f'({", ".join(columns)})' if columns else ''
         placeholders = '?, ' * (len(values) - 1) + '?'
         query = f"INSERT INTO {table_name} {columns} VALUES ({placeholders});"
-        print(query)
+        #print(query)
         await self.cursor.execute(query, values)
         await self.connection.commit()
 
@@ -47,7 +46,7 @@ class Database:
             query += f"{columns[i]} = '{values[i]}', "
         query = query[:-2]
         query += f" WHERE {condition}"
-        print(query)
+        #print(query)
         await self.cursor.execute(query)
         await self.connection.commit()
 

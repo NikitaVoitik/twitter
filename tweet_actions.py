@@ -1,3 +1,6 @@
+import os
+from typing import List
+
 import aiohttp
 import asyncio
 from random import randint
@@ -11,10 +14,10 @@ from json import JSONEncoder
 import config
 import datetime
 from datetime import datetime as Datetime, timedelta
-from logs.logger import Logger
+from loguru import logger
 from solve_captcha import SolveCaptcha
 
-logger = Logger("tweet_actions_py")
+logger.add("logs/tweets.log", rotation="1 day")
 add_to_database = []
 
 
@@ -32,7 +35,7 @@ def DecodeDateTime(empDict):
 
 
 class Account:
-    def __init__(self, token: str, query_ids: dict, proxy: str, twitterDB) -> None:
+    def __init__(self, token: str, query_ids: dict, proxy: str) -> None:
         self.session_length = None
         self.session = None
         self.headers = None
@@ -40,50 +43,15 @@ class Account:
         self.session_all = None
         self.schedule = list([] for _ in range(0, 7))
         self.proxy = proxy
-        self.sessions_in_week = randint(config.settings['sessions_in_week'][0], config.settings['sessions_in_week'][1])
         self.ids = query_ids
         self.token = token
-        self.twitterDB = twitterDB
         self.user_agent = UserAgent().random
         self.table_name = 'TasksAndSchedule'
-
-    def update_schedule(self):
-        cur_time = Datetime.now()
-        for day in self.schedule:
-            for ind in range(0, len(day)):
-                if day[ind] < cur_time:
-                    day.pop(ind)
-        overall_length = randint(config.settings['overall_length'][0], config.settings['overall_length'][1])
-        self.session_length = overall_length // self.sessions_in_week
-        if overall_length % self.sessions_in_week != 0:
-            self.session_length += 1
-        cur = 0
-        for i in self.schedule:
-            cur += len(i)
-        left_sessions = self.sessions_in_week - cur
-        sessions_each_day = list(0 for _ in range(0, 7))
-        while left_sessions:
-            ind = randint(0, 6)
-            sessions_each_day[ind] += 1
-            left_sessions -= 1
-        for ind in range(0, 7):
-            number = sessions_each_day[ind]
-            hours = []
-            simple_hours = []
-            while number:
-                hour = randint(2, 23)
-                delta = timedelta(days=ind, hours=hour - cur_time.hour)
-                if not hour in simple_hours and not hour - 1 in simple_hours and cur_time + delta > cur_time:
-                    simple_hours.append(hour)
-                    hours.append(cur_time + delta - timedelta(minutes=cur_time.minute))
-                number -= 1
-            self.schedule[ind] += hours
-            self.schedule[ind].sort()
+        self.tasks = dict()
 
     async def manage(self):
         while True:
             cur_time = Datetime.now()
-            self.update_schedule()
             # await self.twitterDB.delete_all(self.table_name)
             # await self.twitterDB.insert(self.table_name, [self.token, ' ', json.dumps(self.schedule, cls=DateTimeEncoder)])
             # local_schedule = await self.twitterDB.select(self.table_name, ['schedule'])
@@ -101,22 +69,15 @@ class Account:
             wait_time = next_session - cur_time
             wait_time = wait_time.total_seconds() + randint(0, 3600)
             await asyncio.sleep(wait_time)
-            await self.launch_session(self.session_length, None)
+            await self.launch_session(self.session_length)
 
-    async def first_launch(self):
-        if self.twitterDB.local.get(self.token):
-            if self.twitterDB.local.get(self.token).get('schedule'):
-                self.schedule = self.twitterDB.local[self.token]['schedule']
-        await self.manage()
-
-    async def launch_session(self, session_length: int, tasks: dict | None = None) -> None:
-        csrf_token = md5(randbytes(32)).hexdigest()
+    async def launch_session(self) -> None:
+        csrf_token = md5(os.urandom(32)).hexdigest()
         cookie = f"des_opt_in=Y; auth_token={self.token}; ct0={csrf_token}; x-csrf-token={csrf_token};"
         self.headers = {
             'Accept-Encoding': 'gzip, deflate, br',
             'Accept': '*/*',
             'Connection': 'keep-alive',
-            'User-Agent': self.user_agent,
             'Origin': 'https://mobile.twitter.com',
             'Referer': 'https://mobile.twitter.com/',
             'x-twitter-active-user': 'yes',
@@ -130,12 +91,20 @@ class Account:
 
         async with aiohttp.ClientSession(headers=self.headers) as session:
             self.session = session
-            lock, csrf_token = await self._get_ct0()
-            if lock:
-                await SolveCaptcha(self.token, csrf_token).solve_captcha("")
-            self.headers['cookie'] = f"des_opt_in=Y; auth_token={self.token}; ct0={csrf_token};"
-            self.headers['x-csrf-token'] = csrf_token
-            await self.account_life(session_length, tasks)
+            lock = True
+            while lock:
+                res = await self._get_ct0()
+                lock = res[0]
+                csrf_token = res[1]
+                if lock:
+                    await SolveCaptcha(self.token, csrf_token).solve_captcha("")
+                elif csrf_token == '0':
+                    lock = True
+                    await asyncio.sleep(5)
+                    continue
+                self.headers['cookie'] = f"des_opt_in=Y; auth_token={self.token}; ct0={csrf_token}; x-csrf-token={csrf_token};"
+                self.headers['x-csrf-token'] = csrf_token
+            await self.account_life(self.session_length)
 
             # await self.like('1735742272946442398')
             # await self.retweet('1735742272946442398')
@@ -148,62 +117,83 @@ class Account:
             # await self.follow_users(users, 10)
             # await self.account_life(20, {'follow_popular_users': 10})
 
-    async def account_life(self, session_length: int, tasks: dict | None = None) -> None:
-        end_time = time.time() + session_length * 60
-        tweets = await self.get_tweets()
+    async def account_life(self, session_length: int) -> None:
         chance_like = randint(config.settings['chance_of_like'][0], config.settings['chance_of_like'][1])
         chance_retweet = randint(config.settings['chance_of_retweet'][0], config.settings['chance_of_retweet'][1])
         cur_tweet = 0
+        tweets = await self.get_tweets()
         chance_tasks = randint(1, 100)
+        if self.tasks.get('follow_first_launch'):
+            chance_tasks = 0
         if chance_tasks <= 50:
-            await self.complete_tasks(tasks, [2, 3])
-        while time.time() < end_time + randint(-60, 60):
+            await self.complete_tasks([2, 3])
+            if chance_tasks == 0:
+                await asyncio.sleep(randint(10, 20))
+            tweets = await self.get_tweets()
+        end_time = time.time() + session_length * 60
+        #print('123123', tweets)
+        logger.info(f'Account {self.name} started account life')
+        while time.time() < end_time + randint(-60, 60) and cur_tweet + 1 < len(tweets):
+            cur_tweet += 1
             if not tweets[cur_tweet].isdigit():
-                await asyncio.sleep(randint(4, 8))
-                cur_tweet += 1
+                await asyncio.sleep(randint(1, 2))
                 continue
-            await asyncio.sleep(randint(7, 12))
+            await asyncio.sleep(randint(5, 9))
             chance = randint(1, 100)
             if chance < chance_like:
                 await self.like(tweets[cur_tweet])
-            await asyncio.sleep(randint(0, 1))
-            if chance < chance_retweet:
-                await self.retweet(tweets[cur_tweet])
+                await asyncio.sleep(randint(2, 4))
+                if chance < chance_retweet:
+                    await self.retweet(tweets[cur_tweet])
             await asyncio.sleep(1, 2)
-            cur_tweet += 1
         if chance_tasks > 50:
-            await self.complete_tasks(tasks, [2, 3])
+            await self.complete_tasks([2, 3])
+        logger.info(f'Account {self.name} ended account life')
 
-    async def complete_tasks(self, tasks: dict | None, delay: list) -> None:
-        if tasks is None:
+    async def complete_tasks(self, delay: list) -> None:
+        if self.tasks is None:
             return
-        for task in tasks:
-            content = tasks[task]
-            if task == "follow_popular_users":
+        logger.info(f"Account {self.name} started completing tasks")
+        for task in self.tasks.keys():
+            content = self.tasks[task]
+            if task == "follow_first_launch":
                 popular_users = await self.get_popular_users()
                 await self.follow_users(popular_users, content)
-            elif task == "follow_users":
-                await self.follow_users(content, len(tasks))
+            elif task == "follow_popular_users":
+                popular_users = await self.get_popular_users()
+                await self.follow_users(popular_users, content)
+            elif task == "follow_user":
+                await self.follow_users(content, len(self.tasks))
             elif task == "like_tweet":
                 await self.like(content)
             elif task == "retweet":
                 await self.retweet(content)
             elif task == "comment":
-                await self.comment(content['tweet_id'], content['content'])
+                await self.comment(content[0], content[1])
             await asyncio.sleep(randint(delay[0], delay[1]))
+        self.tasks = {}
+        logger.info(f"Account {self.name} ended completing tasks")
 
-    async def _get_ct0(self) -> tuple[bool, str]:
+    async def _get_ct0(self) -> list[bool | str]:
         try:
             url = 'https://mobile.twitter.com/i/api/1.1/account/settings.json?include_mention_filter=true&include_nsfw_user_flag=true&include_nsfw_admin_flag=true&include_ranked_timeline=true&include_alt_text_compose=true&ext=ssoConnections&include_country_code=true&include_ext_dm_nsfw_media_filter=true&include_ext_sharing_audiospaces_listening_data_with_followers=true'
-            async with self.session.get(url, ssl=False, proxy=self.proxy) as res:
+            async with self.session.get(url, ssl=False, proxy=self.proxy, headers=self.headers) as res:
                 cookie_data = await res.json()
                 self.name = cookie_data.get('screen_name')
-                csrf = self.session.cookie_jar.filter_cookies(url).get("ct0").value
+                print(await res.json())
+
+                csrf = self.session.cookie_jar.filter_cookies(url)
+                csrf = csrf.get("ct0").value
+                #print('youyyouyoyuy', await res.text())
+                #print('pisya', csrf)
                 if "account is temporarily locked" in await res.text():
-                    return True, csrf
-                return False, str(csrf)
+                    return [True, str(csrf)]
+                elif "Could not authenticate you" in await res.text():
+                    raise [False, '0']
+                return [False, str(csrf)]
         except Exception as er:
             logger.error(f"Account {self.token} error {er} when getting csrf token")
+            return [False, '0']
 
     async def like(self, tweet_id: str) -> None:
         url = f'https://twitter.com/i/api/graphql/{self.ids["like"]}/FavoriteTweet'
@@ -297,10 +287,11 @@ class Account:
         try:
             async with self.session.post(url, headers=headers, data=data, ssl=False, proxy=self.proxy) as res:
                 follow_data = await res.json()
-                if follow_data['id'] == int(user_id):
+                #print(follow_data)
+                if follow_data.get('id') == int(user_id):
                     logger.info(f"Account {self.name} is now following {username}")
                 else:
-                    logger.error(f"Account {self.name} error {res.text()} when subbing {username}")
+                    logger.error(f"Account {self.name} error {await res.text()} when subbing {username}")
         except Exception as er:
             logger.error(f"Account {self.name} error {er} in time of following {username}")
 
@@ -374,19 +365,24 @@ class Account:
 
     async def get_tweets(self) -> list:
         url = "https://twitter.com/i/api/graphql/4lamDJErKVeOVyGh-y2UXQ/HomeLatestTimeline?variables=%7B%22count%22%3A20%2C%22includePromotedContent%22%3Atrue%2C%22latestControlAvailable%22%3Atrue%2C%22requestContext%22%3A%22launch%22%7D&features=%7B%22responsive_web_graphql_exclude_directive_enabled%22%3Atrue%2C%22verified_phone_label_enabled%22%3Afalse%2C%22responsive_web_home_pinned_timelines_enabled%22%3Atrue%2C%22creator_subscriptions_tweet_preview_api_enabled%22%3Atrue%2C%22responsive_web_graphql_timeline_navigation_enabled%22%3Atrue%2C%22responsive_web_graphql_skip_user_profile_image_extensions_enabled%22%3Afalse%2C%22c9s_tweet_anatomy_moderator_badge_enabled%22%3Atrue%2C%22tweetypie_unmention_optimization_enabled%22%3Atrue%2C%22responsive_web_edit_tweet_api_enabled%22%3Atrue%2C%22graphql_is_translatable_rweb_tweet_is_translatable_enabled%22%3Atrue%2C%22view_counts_everywhere_api_enabled%22%3Atrue%2C%22longform_notetweets_consumption_enabled%22%3Atrue%2C%22responsive_web_twitter_article_tweet_consumption_enabled%22%3Afalse%2C%22tweet_awards_web_tipping_enabled%22%3Afalse%2C%22freedom_of_speech_not_reach_fetch_enabled%22%3Atrue%2C%22standardized_nudges_misinfo%22%3Atrue%2C%22tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled%22%3Atrue%2C%22longform_notetweets_rich_text_read_enabled%22%3Atrue%2C%22longform_notetweets_inline_media_enabled%22%3Atrue%2C%22responsive_web_media_download_video_enabled%22%3Afalse%2C%22responsive_web_enhance_cards_enabled%22%3Afalse%7D"
-
-        try:
-            async with self.session.get(url, headers=self.headers, ssl=False, proxy=self.proxy) as res:
-                tweets_json = await res.json()
-                tweets = tweets_json['data']['home']['home_timeline_urt']['instructions'][0]['entries']
-                result = []
-                for i in tweets:
-                    cur = i['entryId']
-                    result.append(cur[6:])
-                logger.info(f"Account {self.name} successfully got tweets from followed users")
-                return result
-        except Exception as er:
-            logger.error(f"Account {self.name} error {er} when getting tweets")
+        ind = 0
+        while ind < 3:
+            ind += 1
+            try:
+                async with self.session.get(url, headers=self.headers, ssl=False, proxy=self.proxy) as res:
+                    tweets_json = await res.json()
+                    #logger.info(f"{tweets_json}")
+                    tweets = tweets_json['data']['home']['home_timeline_urt']['instructions'][0]['entries']
+                    #print(tweets)
+                    result = []
+                    for i in tweets:
+                        cur = i['entryId']
+                        result.append(cur[6:])
+                    logger.info(f"Account {self.name} successfully got tweets from followed users")
+                    logger.info(f"{result}")
+                    return result
+            except Exception as er:
+                logger.error(f"Account {self.name} error {er} when getting tweets")
 
     async def get_popular_users(self) -> list:
         url = "https://twitter.com/i/api/graphql/CYSD3D16ZF2JCxd9OR51Yg/ConnectTabTimeline?variables=%7B%22count%22%3A20%2C%22context%22%3A%22%7B%7D%22%7D&features=%7B%22responsive_web_graphql_exclude_directive_enabled%22%3Atrue%2C%22verified_phone_label_enabled%22%3Afalse%2C%22responsive_web_home_pinned_timelines_enabled%22%3Atrue%2C%22creator_subscriptions_tweet_preview_api_enabled%22%3Atrue%2C%22responsive_web_graphql_timeline_navigation_enabled%22%3Atrue%2C%22responsive_web_graphql_skip_user_profile_image_extensions_enabled%22%3Afalse%2C%22c9s_tweet_anatomy_moderator_badge_enabled%22%3Atrue%2C%22tweetypie_unmention_optimization_enabled%22%3Atrue%2C%22responsive_web_edit_tweet_api_enabled%22%3Atrue%2C%22graphql_is_translatable_rweb_tweet_is_translatable_enabled%22%3Atrue%2C%22view_counts_everywhere_api_enabled%22%3Atrue%2C%22longform_notetweets_consumption_enabled%22%3Atrue%2C%22responsive_web_twitter_article_tweet_consumption_enabled%22%3Afalse%2C%22tweet_awards_web_tipping_enabled%22%3Afalse%2C%22freedom_of_speech_not_reach_fetch_enabled%22%3Atrue%2C%22standardized_nudges_misinfo%22%3Atrue%2C%22tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled%22%3Atrue%2C%22longform_notetweets_rich_text_read_enabled%22%3Atrue%2C%22longform_notetweets_inline_media_enabled%22%3Atrue%2C%22responsive_web_media_download_video_enabled%22%3Afalse%2C%22responsive_web_enhance_cards_enabled%22%3Afalse%7D"
@@ -415,7 +411,7 @@ class Account:
         try:
             for user in generated:
                 await self.follow(user)
-                await asyncio.sleep(randint(2, 5))
+                await asyncio.sleep(randint(9, 12))
             logger.info(f"Account {self.name} successfully followed users")
         except Exception as er:
             logger.error(f"Account {self.name} error {er} when trying to follow users")
