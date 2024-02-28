@@ -1,11 +1,11 @@
 {
   "account_lifestyle": {
-    "overall_length": [600, 600],
-    "sessions_in_week": [30, 30],
-    "chance_of_like": [15, 20],
-    "chance_of_retweet": [2, 4],
+    "overall_length": [100, 100],
+    "sessions_in_week": [5, 5],
+    "chance_of_like": [5, 10],
+    "chance_of_retweet": [1, 1],
     "users_to_follow_at_start": [3, 6],
-    "users_to_follow_every_time": [3, 6]
+    "users_to_follow_every_time": [1, 2]
   },
   "pathes": {
     "project_path": "/Users/nikitavoitik/Documents/prog/python/twitter"

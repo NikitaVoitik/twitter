@@ -132,11 +132,14 @@ async def main():
     # await twitterDB.insert(table_name, ('Hihihihi', 'HeHehehehe', 'Hohohoho'), ['token', 'tasks', 'schedule'])
 
     for ind, val in enumerate(proxy):
-        val = val.split('@')
-        proxy[ind] = f'http://{val[1]}@{val[0]}'
+        val = val.split(':')
+        proxy[ind] = f'http://{val[2]}:{val[3]}@{val[0]}:{val[1]}'
+
+    if len(proxy) == 0:
+        proxy = list("" for x in accounts_tokens)
+
     async with aiohttp.ClientSession() as session:
         query_ids = await get_query_ids(session, proxy[0])
-    #localDB[accounts_tokens[0]]['Schedule'].append(Datetime.now() + timedelta(seconds=20))
     sessions_queue = asyncio.Queue()
     accounts = list(
         Account(accounts_tokens[ind], query_ids, proxy[ind]) for ind in range(len(accounts_tokens)))
@@ -151,7 +154,6 @@ async def create_stdin_reader() -> StreamReader:
     loop = asyncio.get_running_loop()
     await loop.connect_read_pipe(lambda: protocol, sys.stdin)
     return stream_reader
-
 
 async def read():
     global localDB
@@ -227,7 +229,7 @@ async def session_producer(queue, accounts: list) -> None:
             #print(cur_time, next_session, next_session - timedelta(hours=2))
             #print(cur_time > next_session - timedelta(hours=2))
             # print(type(cur_time), type(next_session))
-            if cur_time > next_session:
+            if cur_time != next_session:
                 for ind in range(len(accounts)):
                     accounts[ind].localDB = localDB[token]
                     if accounts[ind].token == token:

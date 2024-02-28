@@ -136,19 +136,19 @@ class Account:
         while time.time() < end_time + randint(-60, 60) and cur_tweet + 1 < len(tweets):
             cur_tweet += 1
             if not tweets[cur_tweet].isdigit():
-                await asyncio.sleep(randint(1, 2))
+                await asyncio.sleep(randint(3, 5))
                 continue
-            await asyncio.sleep(randint(5, 9))
+            await asyncio.sleep(randint(8, 12))
             chance = randint(1, 100)
             if chance < chance_like:
                 await self.like(tweets[cur_tweet])
                 await asyncio.sleep(randint(2, 4))
                 if chance < chance_retweet:
                     await self.retweet(tweets[cur_tweet])
-            await asyncio.sleep(1, 2)
+            await asyncio.sleep(3, 5)
         if chance_tasks > 50:
-            await self.complete_tasks([2, 3])
-        logger.info(f'Account {self.name} ended account life')
+            await self.complete_tasks([6, 9])
+        logger.info(f'Account {self.name} ended account life with {cur_tweet} tweets')
 
     async def complete_tasks(self, delay: list) -> None:
         if self.tasks is None:
@@ -385,8 +385,7 @@ class Account:
                 logger.error(f"Account {self.name} error {er} when getting tweets")
 
     async def get_popular_users(self) -> list:
-        url = "https://twitter.com/i/api/graphql/CYSD3D16ZF2JCxd9OR51Yg/ConnectTabTimeline?variables=%7B%22count%22%3A20%2C%22context%22%3A%22%7B%7D%22%7D&features=%7B%22responsive_web_graphql_exclude_directive_enabled%22%3Atrue%2C%22verified_phone_label_enabled%22%3Afalse%2C%22responsive_web_home_pinned_timelines_enabled%22%3Atrue%2C%22creator_subscriptions_tweet_preview_api_enabled%22%3Atrue%2C%22responsive_web_graphql_timeline_navigation_enabled%22%3Atrue%2C%22responsive_web_graphql_skip_user_profile_image_extensions_enabled%22%3Afalse%2C%22c9s_tweet_anatomy_moderator_badge_enabled%22%3Atrue%2C%22tweetypie_unmention_optimization_enabled%22%3Atrue%2C%22responsive_web_edit_tweet_api_enabled%22%3Atrue%2C%22graphql_is_translatable_rweb_tweet_is_translatable_enabled%22%3Atrue%2C%22view_counts_everywhere_api_enabled%22%3Atrue%2C%22longform_notetweets_consumption_enabled%22%3Atrue%2C%22responsive_web_twitter_article_tweet_consumption_enabled%22%3Afalse%2C%22tweet_awards_web_tipping_enabled%22%3Afalse%2C%22freedom_of_speech_not_reach_fetch_enabled%22%3Atrue%2C%22standardized_nudges_misinfo%22%3Atrue%2C%22tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled%22%3Atrue%2C%22longform_notetweets_rich_text_read_enabled%22%3Atrue%2C%22longform_notetweets_inline_media_enabled%22%3Atrue%2C%22responsive_web_media_download_video_enabled%22%3Afalse%2C%22responsive_web_enhance_cards_enabled%22%3Afalse%7D"
-
+        url = "https://twitter.com/i/api/graphql/3fQq7TAUwchh4XYT9LFmBA/ConnectTabTimeline?variables=%7B%22count%22%3A20%2C%22context%22%3A%22%7B%7D%22%7D&features=%7B%22responsive_web_graphql_exclude_directive_enabled%22%3Atrue%2C%22verified_phone_label_enabled%22%3Afalse%2C%22creator_subscriptions_tweet_preview_api_enabled%22%3Atrue%2C%22responsive_web_graphql_timeline_navigation_enabled%22%3Atrue%2C%22responsive_web_graphql_skip_user_profile_image_extensions_enabled%22%3Afalse%2C%22c9s_tweet_anatomy_moderator_badge_enabled%22%3Atrue%2C%22tweetypie_unmention_optimization_enabled%22%3Atrue%2C%22responsive_web_edit_tweet_api_enabled%22%3Atrue%2C%22graphql_is_translatable_rweb_tweet_is_translatable_enabled%22%3Atrue%2C%22view_counts_everywhere_api_enabled%22%3Atrue%2C%22longform_notetweets_consumption_enabled%22%3Atrue%2C%22responsive_web_twitter_article_tweet_consumption_enabled%22%3Atrue%2C%22tweet_awards_web_tipping_enabled%22%3Afalse%2C%22freedom_of_speech_not_reach_fetch_enabled%22%3Atrue%2C%22standardized_nudges_misinfo%22%3Atrue%2C%22tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled%22%3Atrue%2C%22rweb_video_timestamps_enabled%22%3Atrue%2C%22longform_notetweets_rich_text_read_enabled%22%3Atrue%2C%22longform_notetweets_inline_media_enabled%22%3Atrue%2C%22responsive_web_media_download_video_enabled%22%3Afalse%2C%22responsive_web_enhance_cards_enabled%22%3Afalse%7D"
         try:
             async with self.session.get(url, headers=self.headers, ssl=False, proxy=self.proxy) as res:
                 js = await res.json()
@@ -411,7 +410,7 @@ class Account:
         try:
             for user in generated:
                 await self.follow(user)
-                await asyncio.sleep(randint(9, 12))
+                await asyncio.sleep(randint(15, 20))
             logger.info(f"Account {self.name} successfully followed users")
         except Exception as er:
             logger.error(f"Account {self.name} error {er} when trying to follow users")
